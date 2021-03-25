@@ -1,0 +1,24 @@
+{
+  "name": "potato",
+  "version": "1.0.0",
+  "description": "potato.finance",
+  "main": "truffle-config.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "potato"
+  ],
+  "author": "mesh",
+  "license": "MIT",
+  "devDependencies": {
+    "truffle-plugin-verify": "^0.5.7"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^4.0.0",
+    "@truffle/hdwallet-provider": "^1.2.4"
+  }
+}
