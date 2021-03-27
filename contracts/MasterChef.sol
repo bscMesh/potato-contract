@@ -46,7 +46,7 @@ contract MasterChef is Ownable, ReentrancyGuard {
         IBEP20 lpToken;           // Address of LP token contract.
         uint256 allocPoint;       // How many allocation points assigned to this pool. PTTs to distribute per block.
         uint256 lastRewardBlock;  // Last block number that Ptts distribution occurs.
-        uint256 accPotatoPerShare;   // Accumulated PTTs per share, times 1e12. See below.
+        uint256 accPotatoPerShare;   // Accumulated PTTs per share, times 1e18. See below.
         uint16 depositFeeBP;      // Deposit fee in basis points
     }
 
@@ -78,13 +78,13 @@ contract MasterChef is Ownable, ReentrancyGuard {
     event UpdateEmissionRate(address indexed user, uint256 goosePerBlock);
 
     constructor(
-        PotatoToken _potato,
+        address _potatoAddress,
         address _devaddr,
         address _feeAddress,
         uint256 _potatoPerBlock,
         uint256 _startBlock
     ) public {
-        POTATO = _potato;
+        POTATO = PotatoToken(_potatoAddress);
         devaddr = _devaddr;
         feeAddress = _feeAddress;
         potatoPerBlock = _potatoPerBlock;
@@ -144,9 +144,9 @@ contract MasterChef is Ownable, ReentrancyGuard {
         if (block.number > pool.lastRewardBlock && lpSupply != 0) {
             uint256 multiplier = getMultiplier(pool.lastRewardBlock, block.number);
             uint256 potatoReward = multiplier.mul(potatoPerBlock).mul(pool.allocPoint).div(totalAllocPoint);
-            accPotatoPerShare = accPotatoPerShare.add(potatoReward.mul(1e12).div(lpSupply));
+            accPotatoPerShare = accPotatoPerShare.add(potatoReward.mul(1e18).div(lpSupply));
         }
-        return user.amount.mul(accPotatoPerShare).div(1e12).sub(user.rewardDebt);
+        return user.amount.mul(accPotatoPerShare).div(1e18).sub(user.rewardDebt);
     }
 
     // Update reward variables for all pools. Be careful of gas spending!
@@ -172,17 +172,18 @@ contract MasterChef is Ownable, ReentrancyGuard {
         uint256 potatoReward = multiplier.mul(potatoPerBlock).mul(pool.allocPoint).div(totalAllocPoint);
         POTATO.mint(devaddr, potatoReward.div(10));
         POTATO.mint(address(this), potatoReward);
-        pool.accPotatoPerShare = pool.accPotatoPerShare.add(potatoReward.mul(1e12).div(lpSupply));
+        pool.accPotatoPerShare = pool.accPotatoPerShare.add(potatoReward.mul(1e18).div(lpSupply));
         pool.lastRewardBlock = block.number;
     }
 
     // Deposit LP tokens to MasterChef for POTATO allocation.
     function deposit(uint256 _pid, uint256 _amount) public nonReentrant {
+		require(poolInfo.length > _pid, "pool: not exist");
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
         updatePool(_pid);
         if (user.amount > 0) {
-            uint256 pending = user.amount.mul(pool.accPotatoPerShare).div(1e12).sub(user.rewardDebt);
+            uint256 pending = user.amount.mul(pool.accPotatoPerShare).div(1e18).sub(user.rewardDebt);
             if (pending > 0) {
                 safePotatoTransfer(msg.sender, pending);
             }
@@ -197,7 +198,7 @@ contract MasterChef is Ownable, ReentrancyGuard {
                 user.amount = user.amount.add(_amount);
             }
         }
-        user.rewardDebt = user.amount.mul(pool.accPotatoPerShare).div(1e12);
+        user.rewardDebt = user.amount.mul(pool.accPotatoPerShare).div(1e18);
         emit Deposit(msg.sender, _pid, _amount);
     }
 
@@ -207,7 +208,7 @@ contract MasterChef is Ownable, ReentrancyGuard {
         UserInfo storage user = userInfo[_pid][msg.sender];
         require(user.amount >= _amount, "withdraw: not good");
         updatePool(_pid);
-        uint256 pending = user.amount.mul(pool.accPotatoPerShare).div(1e12).sub(user.rewardDebt);
+        uint256 pending = user.amount.mul(pool.accPotatoPerShare).div(1e18).sub(user.rewardDebt);
         if (pending > 0) {
             safePotatoTransfer(msg.sender, pending);
         }
@@ -215,7 +216,7 @@ contract MasterChef is Ownable, ReentrancyGuard {
             user.amount = user.amount.sub(_amount);
             pool.lpToken.safeTransfer(address(msg.sender), _amount);
         }
-        user.rewardDebt = user.amount.mul(pool.accPotatoPerShare).div(1e12);
+        user.rewardDebt = user.amount.mul(pool.accPotatoPerShare).div(1e18);
         emit Withdraw(msg.sender, _pid, _amount);
     }
 
