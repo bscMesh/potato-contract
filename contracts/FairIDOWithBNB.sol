@@ -5,25 +5,22 @@ import "./libs/SafeBEP20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
-contract FairIDO is ReentrancyGuard, Ownable {
+contract FairIDOWithBNB is ReentrancyGuard, Ownable {
   using SafeMath for uint256;
   using SafeBEP20 for IBEP20;
 
   // Info of each user.
   struct UserInfo {
-      uint256 amount;   // How many tokens the user has provided.
+      uint256 amount;   // How many BNB the user has provided.
       bool claimed;  // default false
   }
-
-  // The raising token
-  IBEP20 public lpToken;
   // The offering token
   IBEP20 public offeringToken;
   // The block number when fair ido starts
   uint256 public startBlock;
   // The block number when fair ido ends
   uint256 public endBlock;
-  // total amount of raising tokens need to be raised
+  // total amount of raising BNB need to be raised
   uint256 public raisingAmount;
   // total amount of offeringToken that will offer
   uint256 public offeringAmount;
@@ -38,14 +35,12 @@ contract FairIDO is ReentrancyGuard, Ownable {
   event Harvest(address indexed user, uint256 offeringAmount, uint256 excessAmount);
 
   constructor(
-	  IBEP20 _lpToken,
       IBEP20 _offeringToken,
       uint256 _startBlock,
       uint256 _endBlock,
       uint256 _offeringAmount,
       uint256 _raisingAmount
   ) public {
-	  lpToken = _lpToken;
       offeringToken = _offeringToken;
       startBlock = _startBlock;
       endBlock = _endBlock;
@@ -64,16 +59,15 @@ contract FairIDO is ReentrancyGuard, Ownable {
     raisingAmount = _raisingAmount;
   }
 
-  function deposit(uint256 _amount) public {
+  receive() external payable{
+    require(msg.value > 0, 'need amount > 0');
     require (block.number > startBlock && block.number < endBlock, 'not ifo time');
-    require (_amount > 0, 'need _amount > 0');
-    lpToken.safeTransferFrom(address(msg.sender), address(this), _amount);
     if (userInfo[msg.sender].amount == 0) {
       addressList.push(address(msg.sender));
     }
-    userInfo[msg.sender].amount = userInfo[msg.sender].amount.add(_amount);
-    totalAmount = totalAmount.add(_amount);
-    emit Deposit(msg.sender, _amount);
+	userInfo[msg.sender].amount = userInfo[msg.sender].amount.add(msg.value);
+	totalAmount = totalAmount.add(msg.value);
+    emit Deposit(msg.sender, msg.value);
   }
 
   function harvest() public nonReentrant {
@@ -86,7 +80,8 @@ contract FairIDO is ReentrancyGuard, Ownable {
       offeringToken.safeTransfer(address(msg.sender), offeringTokenAmount);
     }
     if (refundingTokenAmount > 0) {
-      lpToken.safeTransfer(address(msg.sender), refundingTokenAmount);
+	  address payable refundAccount = payable(msg.sender);
+	  refundAccount.transfer(refundingTokenAmount);
     }
     userInfo[msg.sender].claimed = true;
     emit Harvest(msg.sender, offeringTokenAmount, refundingTokenAmount);
@@ -127,28 +122,22 @@ contract FairIDO is ReentrancyGuard, Ownable {
     return addressList.length;
   }
 
-  function finalWithdraw(uint256 _lpAmount, uint256 _offerAmount) public onlyOwner {
-    require (_lpAmount <= lpToken.balanceOf(address(this)), 'not enough token 0');
-    require (_offerAmount <= offeringToken.balanceOf(address(this)), 'not enough token 1');
+  function finalWithdraw(uint256 _bnbAmount, uint256 _offerAmount) public onlyOwner {
+    require (_bnbAmount <= address(this).balance, 'no enough bnb');
+    require (_offerAmount <= offeringToken.balanceOf(address(this)), 'no enough token 1');
     if(_offerAmount > 0) {
       offeringToken.safeTransfer(address(msg.sender), _offerAmount);
     }
-    if(_lpAmount > 0) {
-      lpToken.safeTransfer(address(msg.sender), _lpAmount);
+    if(_bnbAmount > 0) {
+	  address payable dev = payable(owner());
+	  dev.transfer(_bnbAmount);
     }
   }
   
   //in case someone transfer fund in accident
   function inCaseTokensGetStuck(IBEP20 _token, uint256 _amount) public onlyOwner{
-    require(_token != lpToken, "!safe");
 	require(_token != offeringToken, "!safe");
     IBEP20(_token).safeTransfer(msg.sender, _amount);
   }
   
-  receive() external payable{
-    require(msg.value > 0);
-    //ape in, and donate all to dev...thanks.
-	address payable dev = payable(owner());
-	dev.transfer(msg.value);
-  }
 }
