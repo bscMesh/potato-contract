@@ -54,13 +54,13 @@ contract MasterChef is Ownable, ReentrancyGuard {
     PotatoToken public POTATO;
     // Dev address.
     address public devaddr;
-    // POTATO tokens created per block.
-    uint256 public potatoPerBlock;
-    // Bonus muliplier for early POTATO makers.
-    uint256 public constant BONUS_MULTIPLIER = 1;
+	// POTATO tokens created per block.
+    uint256 public initPotatoPerBlock;
     // Deposit Fee address
-    address public feeAddress;
-
+    address public feeTreasuryAddress;
+	address public feeBuyBackAddress;
+	address public feeDevAddress;
+	
     // Info of each pool.
     PoolInfo[] public poolInfo;
     // Info of each user that stakes LP tokens.
@@ -75,21 +75,27 @@ contract MasterChef is Ownable, ReentrancyGuard {
     event Deposit(address indexed user, uint256 indexed pid, uint256 amount);
     event Withdraw(address indexed user, uint256 indexed pid, uint256 amount);
     event EmergencyWithdraw(address indexed user, uint256 indexed pid, uint256 amount);
-    event SetFeeAddress(address indexed user, address indexed newAddress);
+    event SetTreasuryFeeAddress(address indexed user, address indexed newAddress);
+	event SetBuyBackFeeAddress(address indexed user, address indexed newAddress);
+	event SetDevFeeAddress(address indexed user, address indexed newAddress);
     event SetDevAddress(address indexed user, address indexed newAddress);
     event UpdateEmissionRate(address indexed user, uint256 goosePerBlock);
 
     constructor(
         address _potatoAddress,
         address _devaddr,
-        address _feeAddress,
-        uint256 _potatoPerBlock,
+        address _feeTreasuryAddress,
+		address _feeBuyBackAddress,
+		address _feeDevAddress,
+        uint256 _initPotatoPerBlock,
         uint256 _startBlock
     ) public {
         POTATO = PotatoToken(_potatoAddress);
         devaddr = _devaddr;
-        feeAddress = _feeAddress;
-        potatoPerBlock = _potatoPerBlock;
+        feeTreasuryAddress = _feeTreasuryAddress;
+		feeBuyBackAddress = _feeBuyBackAddress;
+		feeDevAddress = _feeDevAddress;
+		initPotatoPerBlock = _initPotatoPerBlock;
         startBlock = _startBlock;
     }
 
@@ -133,9 +139,29 @@ contract MasterChef is Ownable, ReentrancyGuard {
     }
 
     // Return reward multiplier over the given _from to _to block.
-    function getMultiplier(uint256 _from, uint256 _to) public pure returns (uint256) {
-        return _to.sub(_from).mul(BONUS_MULTIPLIER);
+    function getMultiplier(uint256 _from, uint256 _to) public view returns (uint256) {
+		//60*60*24/3 = 28800
+		if((block.number - startBlock)/28800 > 2) return _to.sub(_from);
+		//second day *2 bonus
+		if((block.number - startBlock)/28800 > 1) return _to.sub(_from).mul(2);
+		//first day *3 bonus
+        return _to.sub(_from).mul(3);
     }
+	
+	//60*60*24*7 / 3 = 201600
+	function getWeeksFromStart() public view returns(uint256){
+	    return (block.number - startBlock)/201600;
+	}
+    
+	// Deflactionary System -5% minted token every week
+	function getPotatoPerBlock()public view returns(uint256){
+		uint curWeek = getWeeksFromStart();
+		uint potatoPerBlock = initPotatoPerBlock;
+	    for (uint256 i = 0; i < curWeek; i++) {
+            potatoPerBlock = potatoPerBlock.div(20).mul(19);
+        }
+		return potatoPerBlock;
+	}
 
     // View function to see pending POTATO on frontend.
     function pendingPotato(uint256 _pid, address _user) external view returns (uint256) {
@@ -145,7 +171,7 @@ contract MasterChef is Ownable, ReentrancyGuard {
         uint256 lpSupply = pool.lpToken.balanceOf(address(this));
         if (block.number > pool.lastRewardBlock && lpSupply != 0) {
             uint256 multiplier = getMultiplier(pool.lastRewardBlock, block.number);
-            uint256 potatoReward = multiplier.mul(potatoPerBlock).mul(pool.allocPoint).div(totalAllocPoint);
+            uint256 potatoReward = multiplier.mul(getPotatoPerBlock()).mul(pool.allocPoint).div(totalAllocPoint);
             accPotatoPerShare = accPotatoPerShare.add(potatoReward.mul(minDec).div(lpSupply));
         }
         return user.amount.mul(accPotatoPerShare).div(minDec).sub(user.rewardDebt);
@@ -171,8 +197,9 @@ contract MasterChef is Ownable, ReentrancyGuard {
             return;
         }
         uint256 multiplier = getMultiplier(pool.lastRewardBlock, block.number);
-        uint256 potatoReward = multiplier.mul(potatoPerBlock).mul(pool.allocPoint).div(totalAllocPoint);
-        POTATO.mint(devaddr, potatoReward.div(10));
+        uint256 potatoReward = multiplier.mul(getPotatoPerBlock()).mul(pool.allocPoint).div(totalAllocPoint);
+        POTATO.mint(devaddr, potatoReward.div(20));
+		POTATO.mint(feeDevAddress, potatoReward.div(20));
         POTATO.mint(address(this), potatoReward);
         pool.accPotatoPerShare = pool.accPotatoPerShare.add(potatoReward.mul(minDec).div(lpSupply));
         pool.lastRewardBlock = block.number;
@@ -194,7 +221,9 @@ contract MasterChef is Ownable, ReentrancyGuard {
             pool.lpToken.safeTransferFrom(address(msg.sender), address(this), _amount);
             if (pool.depositFeeBP > 0) {
                 uint256 depositFee = _amount.mul(pool.depositFeeBP).div(10000);
-                pool.lpToken.safeTransfer(feeAddress, depositFee);
+                pool.lpToken.safeTransfer(feeBuyBackAddress, depositFee.mul(4).div(10));
+				pool.lpToken.safeTransfer(feeTreasuryAddress, depositFee.mul(3).div(10));
+				pool.lpToken.safeTransfer(feeDevAddress, depositFee.mul(3).div(10));
                 user.amount = user.amount.add(_amount).sub(depositFee);
             } else {
                 user.amount = user.amount.add(_amount);
@@ -252,16 +281,27 @@ contract MasterChef is Ownable, ReentrancyGuard {
         emit SetDevAddress(msg.sender, _devaddr);
     }
 
-    function setFeeAddress(address _feeAddress) public {
-        require(msg.sender == feeAddress, "dev: FUCK OFF!");
-        feeAddress = _feeAddress;
-        emit SetFeeAddress(msg.sender, _feeAddress);
+	function setFeeTreasuryAddressAddress(address _feeAddress) public{
+        require(msg.sender == feeTreasuryAddress, "setFeeAddress: FORBIDDEN");
+        feeTreasuryAddress = _feeAddress;
+		emit SetTreasuryFeeAddress(msg.sender, _feeAddress);
+    }
+	
+	function setFeeBuyBackAddressAddress(address _feeAddress) public{
+        require(msg.sender == feeBuyBackAddress, "setFeeAddress: FORBIDDEN");
+        feeBuyBackAddress = _feeAddress;
+		emit SetBuyBackFeeAddress(msg.sender, _feeAddress);
+    }
+	
+	function setFeeDevAddressAddress(address _feeAddress) public{
+        require(msg.sender == feeDevAddress, "setFeeAddress: FORBIDDEN");
+        feeDevAddress = _feeAddress;
+		emit SetDevFeeAddress(msg.sender, _feeAddress);
     }
 
-    //Pancake has to add hidden dummy pools inorder to alter the emission, here we make it simple and transparent to all.
     function updateEmissionRate(uint256 _potatoPerBlock) public onlyOwner {
         massUpdatePools();
-        potatoPerBlock = _potatoPerBlock;
+        initPotatoPerBlock = _potatoPerBlock;
         emit UpdateEmissionRate(msg.sender, _potatoPerBlock);
     }
 }
